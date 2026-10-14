@@ -185,12 +185,6 @@ public final class DeckView extends View {
         badge += "文字记录";
         canvas.drawText(badge, textLeft, metaBaseline, paint);
 
-        paint.setTextAlign(Paint.Align.RIGHT);
-        paint.setTextSize(dp(10) * scale);
-        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
-        paint.setColor(withAlpha(Color.argb(145, 53, 49, 70), alpha));
-        canvas.drawText(String.format(Locale.getDefault(), "%02d / %02d", index + 1, cards.size()), right, metaBaseline, paint);
-
         // An optional title consumes only as much space as it needs; untitled cards start with body text.
         String title = card.title == null ? "" : card.title.trim();
         float bodyTop;
@@ -235,9 +229,13 @@ public final class DeckView extends View {
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setTextSize(dp(10) * scale);
         paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
-        paint.setColor(withAlpha(Color.argb(145, 46, 41, 63), alpha));
+        paint.setColor(withAlpha(Color.argb(132, 46, 41, 63), alpha));
         String footer = card.pinned ? "优先显示" : (card.favorite ? "已收藏" : "文字卡片");
         canvas.drawText(footer, textLeft + dp(31) * scale, cardBottom - dp(19) * scale, paint);
+        paint.setTextAlign(Paint.Align.RIGHT);
+        paint.setTextSize(dp(9) * scale);
+        paint.setColor(withAlpha(Color.argb(105, 72, 67, 95), alpha));
+        canvas.drawText(String.format(Locale.getDefault(), "%02d / %02d", index + 1, cards.size()), right, cardBottom - dp(19) * scale, paint);
     }
 
     private void drawEmptyState(Canvas canvas, float w, float h) {
@@ -303,16 +301,16 @@ public final class DeckView extends View {
                 }
                 if (dragging && !longPressed) {
                     float visualStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
-                    float dragStep = Math.max(dp(105), visualStep * 0.62f);
+                    float dragStep = Math.max(dp(78), Math.min(dp(185), visualStep * 0.38f));
                     progress = clamp(downProgress - dy / dragStep, 0f, Math.max(0, cards.size() - 1));
                     if (!motionSoundStarted && Math.abs(dy) > dp(5)) {
-                        sound.startRotate();
+                        sound.startRotate(false);
                         motionSoundStarted = true;
                     }
                     int rounded = Math.round(progress);
                     if (rounded != lastRoundedIndex) {
                         lastRoundedIndex = rounded;
-                        if (motionSoundStarted) sound.playTick();
+                        if (motionSoundStarted) sound.playTick(false);
                         if (hapticsEnabled) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                     }
                         invalidate();
@@ -328,8 +326,8 @@ public final class DeckView extends View {
                 if (dragging && !longPressed) {
                     float velocityY = velocityTracker == null ? 0f : velocityTracker.getYVelocity();
                     float visualStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
-                    float dragStep = Math.max(dp(105), visualStep * 0.62f);
-                    float projection = clamp((velocityY / dragStep) * 0.30f, -8f, 8f);
+                    float dragStep = Math.max(dp(78), Math.min(dp(185), visualStep * 0.38f));
+                    float projection = clamp((velocityY / dragStep) * 0.22f, -12f, 12f);
                     float projected = progress - projection;
                     int target = Math.round(projected);
                     target = Math.max(0, Math.min(cards.size() - 1, target));
@@ -374,7 +372,7 @@ public final class DeckView extends View {
         if (animator != null) animator.cancel();
         final float start = progress;
         final float end = target;
-        long duration = Math.min(260L, 95L + (long) (Math.abs(end - start) * 19L));
+        long duration = Math.min(220L, 82L + (long) (Math.abs(end - start) * 12L));
         animator = ValueAnimator.ofFloat(start, end);
         animator.setDuration(duration);
         animator.setInterpolator(new DecelerateInterpolator(1.15f));
@@ -383,7 +381,7 @@ public final class DeckView extends View {
             int rounded = Math.round(progress);
             if (rounded != lastRoundedIndex) {
                 lastRoundedIndex = rounded;
-                if (withFeedback && motionSoundStarted) sound.playTick();
+                if (withFeedback && motionSoundStarted) sound.playTick(false);
             }
             invalidate();
             if (listener != null) listener.onCardChanged(getSelectedCard());
@@ -396,7 +394,7 @@ public final class DeckView extends View {
                 progress = end;
                 lastRoundedIndex = Math.round(progress);
                 sound.stopRotate();
-                if (withFeedback && motionSoundStarted) sound.playSnap();
+                if (withFeedback && motionSoundStarted) sound.playSnap(false);
                 motionSoundStarted = false;
                 invalidate();
                 if (listener != null) {

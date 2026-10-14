@@ -59,7 +59,7 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     private SoundEngine sound;
     private android.content.SharedPreferences settings;
     private LinearLayout root;
-    private LinearLayout groupList;
+    private ArcGroupRail groupRail;
     private PopupWindow groupDrawerPopup;
     private LinearLayout header;
     private TextView titleText;
@@ -73,16 +73,22 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     private boolean hapticsEnabled = false;
     private float soundVolume = 0.36f;
     private boolean soundEnabled = true;
+    private boolean railSoundEnabled = true;
+    private boolean cardSoundEnabled = true;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         store = new DataStore(this);
         settings = getSharedPreferences("text_caddy_settings", MODE_PRIVATE);
         soundEnabled = settings.getBoolean("sound_enabled", true);
+        railSoundEnabled = settings.getBoolean("rail_sound_enabled", true);
+        cardSoundEnabled = settings.getBoolean("card_sound_enabled", true);
         hapticsEnabled = settings.getBoolean("haptics_enabled", false);
         arcEnabled = settings.getBoolean("arc_enabled", true);
         soundVolume = settings.getInt("sound_volume", 36) / 100f;
         sound = new SoundEngine(this, soundEnabled, soundVolume);
+        sound.setRailEnabled(railSoundEnabled);
+        sound.setCardEnabled(cardSoundEnabled);
         currentGroupId = settings.getString("current_group", "all");
         if (!"all".equals(currentGroupId) && store.getGroup(currentGroupId) == null) currentGroupId = "all";
         buildLayout();
@@ -108,31 +114,14 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         root.setBackgroundColor(BG);
         setContentView(root);
 
-        // A narrow, colored index rail keeps almost all horizontal space for text cards.
-        LinearLayout rail = new LinearLayout(this);
-        rail.setOrientation(LinearLayout.VERTICAL);
-        rail.setPadding(dp(3), dp(7), dp(3), dp(7));
-        rail.setBackgroundColor(Color.rgb(250, 248, 253));
-        rail.setClickable(true);
-        rail.setOnLongClickListener(v -> { showGroupDrawer(); return true; });
-        root.addView(rail, new LinearLayout.LayoutParams(dp(38), ViewGroup.LayoutParams.MATCH_PARENT));
-
-        ScrollView groupScroll = new ScrollView(this);
-        groupScroll.setFillViewport(false);
-        groupScroll.setVerticalScrollBarEnabled(false);
-        groupList = new LinearLayout(this);
-        groupList.setOrientation(LinearLayout.VERTICAL);
-        groupScroll.addView(groupList);
-        rail.addView(groupScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
-        TextView addGroup = text("＋", 18, ACCENT, true);
-        addGroup.setGravity(Gravity.CENTER);
-        addGroup.setContentDescription("新建组别");
-        addGroup.setBackground(roundBg(Color.rgb(237, 233, 252), dp(10)));
-        addGroup.setOnClickListener(v -> showGroupEditor(null));
-        LinearLayout.LayoutParams addGroupLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38));
-        addGroupLp.topMargin = dp(5);
-        rail.addView(addGroup, addGroupLp);
+        // A narrow circular-dial rail keeps most horizontal space available for text cards.
+        groupRail = new ArcGroupRail(this, sound, new ArcGroupRail.Listener() {
+            @Override public void onGroupSelected(String groupId) { selectGroup(groupId); }
+            @Override public void onOpenGroupList() { showGroupDrawer(); }
+            @Override public void onAddGroup() { showGroupEditor(null); }
+        });
+        groupRail.setHapticsEnabled(hapticsEnabled);
+        root.addView(groupRail, new LinearLayout.LayoutParams(dp(50), ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
@@ -216,29 +205,14 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     }
 
     private void renderGroups() {
-        groupList.removeAllViews();
-        addMiniGroupTab("all", "全部记录", ACCENT, store.getCards("all").size(), true);
-        for (GroupRecord g : store.getGroups()) {
-            addMiniGroupTab(g.id, g.name, g.color, store.getCards(g.id).size(), false);
+        List<ArcGroupRail.Tab> tabs = new ArrayList<>();
+        tabs.add(new ArcGroupRail.Tab("all", "全", "全部记录", ACCENT, store.getCards("all").size()));
+        for (GroupRecord group : store.getGroups()) {
+            String name = group.name == null ? "组别" : group.name.trim();
+            String shortLabel = "收藏".equals(name) ? "藏" : (name.isEmpty() ? "组" : name.substring(0, 1));
+            tabs.add(new ArcGroupRail.Tab(group.id, shortLabel, name, group.color, store.getCards(group.id).size()));
         }
-    }
-
-    private void addMiniGroupTab(String id, String name, int color, int count, boolean all) {
-        boolean selected = id.equals(currentGroupId);
-        String initial = all ? "全" : ("收藏".equals(name) ? "藏" : (name == null || name.trim().isEmpty() ? "组" : name.trim().substring(0, 1)));
-        TextView tab = text(initial, 13, contrastInk(color), true);
-        tab.setGravity(Gravity.CENTER);
-        tab.setMaxLines(1);
-        GradientDrawable tabBackground = roundBg(color, dp(9));
-        tabBackground.setStroke(dp(selected ? 2 : 1), selected ? ACCENT : Color.argb(45, 65, 58, 94));
-        tab.setBackground(tabBackground);
-        tab.setElevation(selected ? dp(2) : 0);
-        tab.setContentDescription(name + "，" + count + " 张卡片；长按打开完整组别列表");
-        LinearLayout.LayoutParams tabLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38));
-        tabLp.bottomMargin = dp(4);
-        groupList.addView(tab, tabLp);
-        tab.setOnClickListener(v -> selectGroup(id));
-        tab.setOnLongClickListener(v -> { showGroupDrawer(); return true; });
+        groupRail.setTabs(tabs, currentGroupId);
     }
 
     private void selectGroup(String id) {
@@ -747,14 +721,20 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(19), dp(5), dp(19), dp(5));
         Switch soundSwitch = new Switch(this);
-        soundSwitch.setText("机械滑动声音"); soundSwitch.setTextSize(14); soundSwitch.setChecked(soundEnabled);
+        soundSwitch.setText("机械声音总开关"); soundSwitch.setTextSize(14); soundSwitch.setChecked(soundEnabled);
+        Switch railSoundSwitch = new Switch(this);
+        railSoundSwitch.setText("圆弧转盘机械声"); railSoundSwitch.setTextSize(14); railSoundSwitch.setChecked(railSoundEnabled);
+        Switch cardSoundSwitch = new Switch(this);
+        cardSoundSwitch.setText("卡片滑动机械声"); cardSoundSwitch.setTextSize(14); cardSoundSwitch.setChecked(cardSoundEnabled);
         Switch arcSwitch = new Switch(this);
         arcSwitch.setText("卡片弧形与惯性动画"); arcSwitch.setTextSize(14); arcSwitch.setChecked(arcEnabled);
         Switch hapticSwitch = new Switch(this);
         hapticSwitch.setText("定位时轻微振动"); hapticSwitch.setTextSize(14); hapticSwitch.setChecked(hapticsEnabled);
-        panel.addView(soundSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(47)));
-        panel.addView(arcSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(47)));
-        panel.addView(hapticSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(47)));
+        panel.addView(soundSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        panel.addView(railSoundSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        panel.addView(cardSoundSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        panel.addView(arcSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        panel.addView(hapticSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
         TextView volumeLabel = text("声音音量　" + Math.round(soundVolume * 100) + "%", 12, MUTED, false);
         SeekBar volumeBar = new SeekBar(this);
         volumeBar.setMax(100); volumeBar.setProgress(Math.round(soundVolume * 100));
@@ -775,13 +755,28 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("交互与数据设置")
                 .setView(panel).setPositiveButton("完成", null).create();
         soundSwitch.setOnCheckedChangeListener((button, checked) -> {
-            soundEnabled = checked; sound.setEnabled(checked); settings.edit().putBoolean("sound_enabled", checked).apply();
+            soundEnabled = checked;
+            sound.setEnabled(checked);
+            settings.edit().putBoolean("sound_enabled", checked).apply();
+        });
+        railSoundSwitch.setOnCheckedChangeListener((button, checked) -> {
+            railSoundEnabled = checked;
+            sound.setRailEnabled(checked);
+            settings.edit().putBoolean("rail_sound_enabled", checked).apply();
+        });
+        cardSoundSwitch.setOnCheckedChangeListener((button, checked) -> {
+            cardSoundEnabled = checked;
+            sound.setCardEnabled(checked);
+            settings.edit().putBoolean("card_sound_enabled", checked).apply();
         });
         arcSwitch.setOnCheckedChangeListener((button, checked) -> {
             arcEnabled = checked; deck.setArcEnabled(checked); settings.edit().putBoolean("arc_enabled", checked).apply();
         });
         hapticSwitch.setOnCheckedChangeListener((button, checked) -> {
-            hapticsEnabled = checked; deck.setHapticsEnabled(checked); settings.edit().putBoolean("haptics_enabled", checked).apply();
+            hapticsEnabled = checked;
+            deck.setHapticsEnabled(checked);
+            groupRail.setHapticsEnabled(checked);
+            settings.edit().putBoolean("haptics_enabled", checked).apply();
         });
         volumeBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
