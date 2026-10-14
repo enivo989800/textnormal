@@ -20,10 +20,9 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
+import android.widget.PopupWindow;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -61,6 +60,7 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     private android.content.SharedPreferences settings;
     private LinearLayout root;
     private LinearLayout groupList;
+    private PopupWindow groupDrawerPopup;
     private LinearLayout header;
     private TextView titleText;
     private TextView subtitleText;
@@ -90,6 +90,10 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     }
 
     @Override public void onBackPressed() {
+        if (groupDrawerPopup != null && groupDrawerPopup.isShowing()) {
+            groupDrawerPopup.dismiss();
+            return;
+        }
         super.onBackPressed();
     }
 
@@ -104,31 +108,14 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         root.setBackgroundColor(BG);
         setContentView(root);
 
+        // A narrow, colored index rail keeps almost all horizontal space for text cards.
         LinearLayout rail = new LinearLayout(this);
         rail.setOrientation(LinearLayout.VERTICAL);
-        rail.setPadding(dp(8), dp(12), dp(8), dp(10));
+        rail.setPadding(dp(3), dp(7), dp(3), dp(7));
         rail.setBackgroundColor(Color.rgb(250, 248, 253));
-        root.addView(rail, new LinearLayout.LayoutParams(dp(88), ViewGroup.LayoutParams.MATCH_PARENT));
-
-        LinearLayout brand = new LinearLayout(this);
-        brand.setOrientation(LinearLayout.VERTICAL);
-        brand.setGravity(Gravity.CENTER);
-        TextView mark = text("匣", 21, Color.WHITE, true);
-        mark.setGravity(Gravity.CENTER);
-        mark.setBackground(roundBg(ACCENT, dp(13)));
-        brand.addView(mark, new LinearLayout.LayoutParams(dp(43), dp(43)));
-        TextView brandLabel = text("文字卡匣", 11, INK, true);
-        brandLabel.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams brandLabelLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(25));
-        brandLabelLp.topMargin = dp(4);
-        brand.addView(brandLabel, brandLabelLp);
-        rail.addView(brand, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(77)));
-
-        TextView groupCaption = text("分 组", 10, MUTED, true);
-        groupCaption.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams captionLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28));
-        captionLp.topMargin = dp(8);
-        rail.addView(groupCaption, captionLp);
+        rail.setClickable(true);
+        rail.setOnLongClickListener(v -> { showGroupDrawer(); return true; });
+        root.addView(rail, new LinearLayout.LayoutParams(dp(38), ViewGroup.LayoutParams.MATCH_PARENT));
 
         ScrollView groupScroll = new ScrollView(this);
         groupScroll.setFillViewport(false);
@@ -138,41 +125,44 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         groupScroll.addView(groupList);
         rail.addView(groupScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        TextView addGroup = text("＋\n新组", 12, ACCENT, true);
+        TextView addGroup = text("＋", 18, ACCENT, true);
         addGroup.setGravity(Gravity.CENTER);
-        addGroup.setBackground(roundBg(Color.rgb(237, 233, 252), dp(13)));
+        addGroup.setContentDescription("新建组别");
+        addGroup.setBackground(roundBg(Color.rgb(237, 233, 252), dp(10)));
         addGroup.setOnClickListener(v -> showGroupEditor(null));
-        LinearLayout.LayoutParams addGroupLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(53));
-        addGroupLp.topMargin = dp(7);
+        LinearLayout.LayoutParams addGroupLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38));
+        addGroupLp.topMargin = dp(5);
         rail.addView(addGroup, addGroupLp);
 
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
+        // Compact top bar; the saved text itself remains the main visual focus.
         header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(14), dp(13), dp(12), dp(7));
-        main.addView(header, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(74)));
+        header.setPadding(dp(8), dp(3), dp(8), dp(3));
+        main.addView(header, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
 
         LinearLayout heading = new LinearLayout(this);
         heading.setOrientation(LinearLayout.VERTICAL);
         heading.setGravity(Gravity.CENTER_VERTICAL);
-        titleText = text("全部记录", 20, INK, true);
-        subtitleText = text("轻拨卡片 · 收纳灵感", 11, MUTED, false);
+        titleText = text("全部记录", 18, INK, true);
+        titleText.setSingleLine(true);
+        titleText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        subtitleText = text("快速浏览文字卡片", 10, MUTED, false);
+        // Keep the subtitle model available for state updates, but do not spend screen height on it.
+        subtitleText.setVisibility(View.GONE);
         heading.addView(titleText);
-        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subLp.topMargin = dp(3);
-        heading.addView(subtitleText, subLp);
         header.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
         TextView searchButton = smallTopButton("⌕", "搜索全部记录");
         searchButton.setOnClickListener(v -> showSearchDialog());
-        header.addView(searchButton, new LinearLayout.LayoutParams(dp(39), dp(39)));
+        header.addView(searchButton, new LinearLayout.LayoutParams(dp(35), dp(35)));
         TextView settingsButton = smallTopButton("☷", "设置");
-        LinearLayout.LayoutParams settingLp = new LinearLayout.LayoutParams(dp(39), dp(39));
-        settingLp.leftMargin = dp(5);
+        LinearLayout.LayoutParams settingLp = new LinearLayout.LayoutParams(dp(35), dp(35));
+        settingLp.leftMargin = dp(4);
         settingsButton.setOnClickListener(v -> showSettings());
         header.addView(settingsButton, settingLp);
 
@@ -182,34 +172,38 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         deck.setHapticsEnabled(hapticsEnabled);
         deckFrame.addView(deck, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout.LayoutParams deckLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        deckLp.leftMargin = dp(4);
-        deckLp.rightMargin = dp(4);
+        deckLp.leftMargin = dp(1);
+        deckLp.rightMargin = dp(1);
         main.addView(deckFrame, deckLp);
 
         LinearLayout footer = new LinearLayout(this);
         footer.setOrientation(LinearLayout.HORIZONTAL);
         footer.setGravity(Gravity.CENTER_VERTICAL);
-        footer.setPadding(dp(14), dp(8), dp(13), dp(15));
-        main.addView(footer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(67)));
+        footer.setPadding(dp(8), dp(2), dp(8), dp(2));
+        main.addView(footer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(49)));
 
         LinearLayout footerInfo = new LinearLayout(this);
         footerInfo.setOrientation(LinearLayout.VERTICAL);
         footerInfo.setGravity(Gravity.CENTER_VERTICAL);
         countText = text("0 张卡片", 12, INK, true);
-        activeGroupText = text("上下拨动浏览", 10, MUTED, false);
+        countText.setSingleLine(true);
+        countText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        activeGroupText = text("上下快速拨动", 9, MUTED, false);
+        activeGroupText.setSingleLine(true);
+        activeGroupText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         footerInfo.addView(countText);
         LinearLayout.LayoutParams infoLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        infoLp.topMargin = dp(3);
+        infoLp.topMargin = dp(1);
         footerInfo.addView(activeGroupText, infoLp);
         footer.addView(footerInfo, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
-        TextView addCard = text("＋  新建卡片", 13, Color.WHITE, true);
+        TextView addCard = text("＋ 新建卡片", 12, Color.WHITE, true);
         addCard.setGravity(Gravity.CENTER);
-        addCard.setBackground(roundBg(ACCENT, dp(18)));
-        addCard.setElevation(dp(3));
-        addCard.setPadding(dp(14), 0, dp(14), 0);
+        addCard.setBackground(roundBg(ACCENT, dp(15)));
+        addCard.setElevation(dp(2));
+        addCard.setPadding(dp(12), 0, dp(12), 0);
         addCard.setOnClickListener(v -> showCardEditor(null));
-        footer.addView(addCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(43)));
+        footer.addView(addCard, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(39)));
     }
 
     private void renderAll() {
@@ -217,49 +211,139 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         renderCards();
         String name = getCurrentGroupName();
         titleText.setText(name);
-        subtitleText.setText("轻拨卡片 · 收纳灵感");
+        subtitleText.setText("快速浏览文字卡片");
         settings.edit().putString("current_group", currentGroupId).apply();
     }
 
     private void renderGroups() {
         groupList.removeAllViews();
-        addGroupRow("all", "全部", ACCENT, store.getCards("all").size(), true);
+        addMiniGroupTab("all", "全部记录", ACCENT, store.getCards("all").size(), true);
         for (GroupRecord g : store.getGroups()) {
-            addGroupRow(g.id, g.name, g.color, store.getCards(g.id).size(), false);
+            addMiniGroupTab(g.id, g.name, g.color, store.getCards(g.id).size(), false);
         }
     }
 
-    private void addGroupRow(String id, String name, int color, int count, boolean all) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setGravity(Gravity.CENTER);
-        row.setPadding(dp(2), dp(5), dp(2), dp(5));
+    private void addMiniGroupTab(String id, String name, int color, int count, boolean all) {
         boolean selected = id.equals(currentGroupId);
-        row.setBackground(roundBg(selected ? Color.rgb(237, 233, 252) : Color.TRANSPARENT, dp(13)));
+        String initial = all ? "全" : ("收藏".equals(name) ? "藏" : (name == null || name.trim().isEmpty() ? "组" : name.trim().substring(0, 1)));
+        TextView tab = text(initial, 13, contrastInk(color), true);
+        tab.setGravity(Gravity.CENTER);
+        tab.setMaxLines(1);
+        GradientDrawable tabBackground = roundBg(color, dp(9));
+        tabBackground.setStroke(dp(selected ? 2 : 1), selected ? ACCENT : Color.argb(45, 65, 58, 94));
+        tab.setBackground(tabBackground);
+        tab.setElevation(selected ? dp(2) : 0);
+        tab.setContentDescription(name + "，" + count + " 张卡片；长按打开完整组别列表");
+        LinearLayout.LayoutParams tabLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38));
+        tabLp.bottomMargin = dp(4);
+        groupList.addView(tab, tabLp);
+        tab.setOnClickListener(v -> selectGroup(id));
+        tab.setOnLongClickListener(v -> { showGroupDrawer(); return true; });
+    }
+
+    private void selectGroup(String id) {
+        if (!currentGroupId.equals(id)) {
+            currentGroupId = id;
+            sound.stopRotate();
+            renderAll();
+        }
+    }
+
+    private void showGroupDrawer() {
+        if (groupDrawerPopup != null && groupDrawerPopup.isShowing()) return;
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(15), dp(12), dp(13), dp(12));
+        panel.setBackground(roundBg(Color.rgb(252, 251, 255), dp(18)));
+        panel.setElevation(dp(16));
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.HORIZONTAL);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text("选择组别", 18, INK, true);
+        heading.addView(label, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        TextView close = text("×", 25, MUTED, false);
+        close.setGravity(Gravity.CENTER);
+        close.setContentDescription("关闭组别列表");
+        heading.addView(close, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        panel.addView(heading);
+
+        TextView hint = text("轻触切换；长按组别进行管理", 11, MUTED, false);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28));
+        hintLp.topMargin = dp(1);
+        panel.addView(hint, hintLp);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout options = new LinearLayout(this);
+        options.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(options);
+        panel.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        addDrawerGroupRow(options, "all", "全部记录", ACCENT, store.getCards("all").size(), true);
+        for (GroupRecord group : store.getGroups()) {
+            addDrawerGroupRow(options, group.id, group.name, group.color, store.getCards(group.id).size(), false);
+        }
+
+        TextView add = text("＋  新建组别", 13, ACCENT, true);
+        add.setGravity(Gravity.CENTER);
+        add.setBackground(roundBg(Color.rgb(239, 236, 251), dp(12)));
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(45));
+        addLp.topMargin = dp(8);
+        panel.addView(add, addLp);
+
+        PopupWindow popup = new PopupWindow(panel,
+                Math.min(dp(286), (int) (getResources().getDisplayMetrics().widthPixels * 0.78f)),
+                root.getHeight() > 0 ? root.getHeight() : ViewGroup.LayoutParams.MATCH_PARENT, true);
+        popup.setBackgroundDrawable(roundBg(Color.rgb(252, 251, 255), dp(18)));
+        popup.setOutsideTouchable(true);
+        popup.setElevation(dp(16));
+        popup.setClippingEnabled(true);
+        popup.setOnDismissListener(() -> { if (groupDrawerPopup == popup) groupDrawerPopup = null; });
+        groupDrawerPopup = popup;
+        close.setOnClickListener(v -> popup.dismiss());
+        add.setOnClickListener(v -> {
+            popup.dismiss();
+            showGroupEditor(null);
+        });
+        popup.showAtLocation(root, Gravity.TOP | Gravity.LEFT, 0, 0);
+    }
+
+    private void addDrawerGroupRow(LinearLayout parent, String id, String name, int color, int count, boolean all) {
+        boolean selected = id.equals(currentGroupId);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(9), dp(6), dp(8), dp(6));
+        row.setBackground(roundBg(selected ? Color.rgb(239, 236, 251) : Color.TRANSPARENT, dp(11)));
+
         View dot = new View(this);
         dot.setBackground(roundBg(color, dp(5)));
-        row.addView(dot, new LinearLayout.LayoutParams(dp(11), dp(11)));
-        TextView label = text(name, 11, selected ? ACCENT : Color.rgb(83, 80, 101), selected);
-        label.setGravity(Gravity.CENTER);
-        label.setMaxLines(1);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(19));
-        labelLp.topMargin = dp(3);
-        row.addView(label, labelLp);
-        TextView countLabel = text(String.valueOf(count), 9, selected ? ACCENT : MUTED, false);
-        countLabel.setGravity(Gravity.CENTER);
-        row.addView(countLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(13)));
-        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62));
+        row.addView(dot, new LinearLayout.LayoutParams(dp(10), dp(10)));
+
+        TextView nameView = text(name, 14, selected ? ACCENT : INK, selected);
+        nameView.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        nameView.setPadding(dp(10), dp(3), dp(4), dp(3));
+        row.addView(nameView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.setMinimumHeight(dp(50));
+
+        TextView countView = text(String.valueOf(count), 11, MUTED, false);
+        countView.setGravity(Gravity.CENTER);
+        row.addView(countView, new LinearLayout.LayoutParams(dp(30), ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rowLp.bottomMargin = dp(3);
-        groupList.addView(row, rowLp);
+        parent.addView(row, rowLp);
         row.setOnClickListener(v -> {
-            if (!currentGroupId.equals(id)) {
-                currentGroupId = id;
-                sound.stopRotate();
-                renderAll();
-            }
+            selectGroup(id);
+            if (groupDrawerPopup != null && groupDrawerPopup.isShowing()) groupDrawerPopup.dismiss();
         });
-        if (!all) row.setOnLongClickListener(v -> { showGroupMenu(id); return true; });
+        if (!all) row.setOnLongClickListener(v -> {
+            if (groupDrawerPopup != null && groupDrawerPopup.isShowing()) groupDrawerPopup.dismiss();
+            showGroupMenu(id);
+            return true;
+        });
     }
 
     private void renderCards() {
@@ -846,6 +930,7 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     }
 
     @Override protected void onDestroy() {
+        if (groupDrawerPopup != null && groupDrawerPopup.isShowing()) groupDrawerPopup.dismiss();
         if (sound != null) sound.release();
         super.onDestroy();
     }

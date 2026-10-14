@@ -11,7 +11,6 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
@@ -42,7 +41,6 @@ public final class DeckView extends View {
     private float downY;
     private float downX;
     private float downProgress;
-    private float lastProgress;
     private float step;
     private boolean dragging;
     private boolean longPressed;
@@ -61,7 +59,7 @@ public final class DeckView extends View {
         this.sound = sound;
         density = getResources().getDisplayMetrics().density;
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
-        setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        // Keep rendering hardware-accelerated; card movement should stay responsive during fast swipes.
         setFocusable(true);
         setClickable(true);
     }
@@ -110,11 +108,12 @@ public final class DeckView extends View {
             drawEmptyState(canvas, w, h);
             return;
         }
-        float cardHeight = Math.min(dp(280), h * 0.57f);
-        cardHeight = Math.max(dp(190), cardHeight);
-        float cardWidth = Math.min(w - dp(27), dp(410));
+        // Use nearly all available vertical space for the active text card.
+        float cardHeight = Math.min(dp(640), h * (h < dp(430) ? 0.88f : 0.82f));
+        float cardWidth = Math.min(w - dp(10), dp(540));
         cardWidth = Math.max(dp(180), cardWidth);
-        step = arcEnabled ? Math.min(cardHeight * 0.77f, h * 0.365f) : Math.min(cardHeight * 0.82f, h * 0.40f);
+        // Neighbours only peek around the active card; fast motion does not need a large stack gap.
+        step = cardHeight * (arcEnabled ? 0.86f : 0.90f);
         float cx = w / 2f;
         float cy = h / 2f + dp(2);
         int base = (int) Math.floor(progress);
@@ -136,90 +135,108 @@ public final class DeckView extends View {
         }
         paint.clearShadowLayer();
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(Color.argb(150, 131, 125, 158));
-        paint.setTextSize(dp(10));
-        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
-        paint.setTextAlign(Paint.Align.CENTER);
-        canvas.drawText("上下拨动 · 轻触阅读 · 长按操作", w / 2f, h - dp(11), paint);
     }
 
     private void drawCard(Canvas canvas, CardRecord card, int index, float left, float top,
                           float width, float height, float scale, float rotation, int alpha,
                           float pivotX, float pivotY) {
+        float scaledWidth = width * scale;
+        float scaledHeight = height * scale;
+        float cardLeft = pivotX - scaledWidth / 2f;
+        float cardTop = pivotY - scaledHeight / 2f;
+        float cardRight = cardLeft + scaledWidth;
+        float cardBottom = cardTop + scaledHeight;
+
         int save = canvas.save();
         canvas.rotate(rotation, pivotX, pivotY);
         canvas.scale(scale, scale, pivotX, pivotY);
         rect.set(left, top, left + width, top + height);
         int bg = card.color;
         paint.setStyle(Paint.Style.FILL);
+        paint.setColor(withAlpha(Color.rgb(80, 74, 112), Math.min(alpha, 45)));
+        rect.set(left, top + dp(4), left + width, top + height + dp(4));
+        canvas.drawRoundRect(rect, dp(19), dp(19), paint);
+        rect.set(left, top, left + width, top + height);
         paint.setColor(withAlpha(darken(bg, 0.96f), alpha));
-        paint.setShadowLayer(dp(index == Math.round(progress) ? 17 : 7), 0, dp(5), Color.argb(alpha / 3, 52, 45, 83));
-        canvas.drawRoundRect(rect, dp(22), dp(22), paint);
-        paint.clearShadowLayer();
+        canvas.drawRoundRect(rect, dp(19), dp(19), paint);
         paint.setColor(withAlpha(lighten(bg, 1.045f), alpha));
         rect.inset(dp(1), dp(1));
-        canvas.drawRoundRect(rect, dp(21), dp(21), paint);
+        canvas.drawRoundRect(rect, dp(18), dp(18), paint);
         rect.inset(-dp(1), -dp(1));
+        // Subtle top highlight keeps the physical-card feeling without spending text area.
         paint.setColor(withAlpha(Color.argb(30, 255, 255, 255), alpha));
-        rect.set(left + dp(13), top + dp(13), left + width - dp(13), top + dp(16));
+        rect.set(left + dp(13), top + dp(10), left + width - dp(13), top + dp(12));
         canvas.drawRoundRect(rect, dp(2), dp(2), paint);
         canvas.restoreToCount(save);
 
-        // Keep lettering level for legibility even while the card panel tilts underneath it.
-        float scaledWidth = width * scale;
-        float scaledHeight = height * scale;
-        float inset = dp(21) * scale;
-        float textLeft = pivotX - scaledWidth / 2f + inset;
-        float right = pivotX + scaledWidth / 2f - inset;
-        float topText = pivotY - scaledHeight / 2f + dp(33) * scale;
-        paint.setColor(withAlpha(contrastInk(bg), alpha));
-        paint.setTextSize(dp(10) * scale);
-        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        // Keep all text horizontal while the panel itself moves along the mechanical arc.
+        float inset = dp(17) * scale;
+        float textLeft = cardLeft + inset;
+        float right = cardRight - inset;
+        float available = Math.max(dp(80), right - textLeft);
+        float metaBaseline = cardTop + dp(25) * scale;
         paint.setTextAlign(Paint.Align.LEFT);
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+        paint.setTextSize(dp(10) * scale);
+        paint.setColor(withAlpha(contrastInk(bg), alpha));
         String badge = card.pinned ? "置顶 · " : "";
         if (card.favorite) badge += "收藏 · ";
         badge += "文字记录";
-        canvas.drawText(badge, textLeft, topText, paint);
+        canvas.drawText(badge, textLeft, metaBaseline, paint);
 
         paint.setTextAlign(Paint.Align.RIGHT);
         paint.setTextSize(dp(10) * scale);
-        paint.setColor(withAlpha(Color.argb(150, 53, 49, 70), alpha));
-        canvas.drawText(String.format(Locale.getDefault(), "%02d / %02d", index + 1, cards.size()), right, topText, paint);
-
-        paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-        paint.setTextSize(dp(18) * scale);
-        paint.setColor(withAlpha(contrastInk(bg), alpha));
-        String title = card.displayTitle();
-        if (title.length() > 25) title = title.substring(0, 24) + "…";
-        canvas.drawText(title, textLeft, pivotY - scaledHeight / 2f + dp(67) * scale, paint);
-
-        float bodyTop = pivotY - scaledHeight / 2f + dp(97) * scale;
         paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
-        paint.setTextSize(dp(14) * scale);
-        paint.setColor(withAlpha(Color.rgb(58, 55, 73), alpha));
-        float available = scaledWidth - inset * 2f;
-        String bodyText = card.body == null ? "" : card.body.trim();
-        if (bodyText.isEmpty()) bodyText = "（空白记录）";
-        List<String> lines = wrap(bodyText, paint, available, 5);
-        float lineHeight = dp(22) * scale;
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            if (i == lines.size() - 1 && bodyText.length() > joinedLength(lines)) {
-                if (line.length() > 1) line = line.substring(0, Math.max(1, line.length() - 1)) + "…";
+        paint.setColor(withAlpha(Color.argb(145, 53, 49, 70), alpha));
+        canvas.drawText(String.format(Locale.getDefault(), "%02d / %02d", index + 1, cards.size()), right, metaBaseline, paint);
+
+        // An optional title consumes only as much space as it needs; untitled cards start with body text.
+        String title = card.title == null ? "" : card.title.trim();
+        float bodyTop;
+        if (!title.isEmpty()) {
+            paint.setTextAlign(Paint.Align.LEFT);
+            paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            paint.setTextSize(dp(17) * scale);
+            paint.setColor(withAlpha(contrastInk(bg), alpha));
+            float titleTop = cardTop + dp(52) * scale;
+            float titleLineHeight = dp(22) * scale;
+            List<String> titleLines = wrap(title, paint, available, 2);
+            for (int i = 0; i < titleLines.size(); i++) {
+                canvas.drawText(titleLines.get(i), textLeft, titleTop + i * titleLineHeight, paint);
             }
-            canvas.drawText(line, textLeft, bodyTop + i * lineHeight, paint);
+            bodyTop = titleTop + titleLines.size() * titleLineHeight + dp(7) * scale;
+        } else {
+            bodyTop = cardTop + dp(51) * scale;
         }
 
-        paint.setColor(withAlpha(Color.argb(85, 46, 41, 63), alpha));
-        rect.set(textLeft, pivotY + scaledHeight / 2f - dp(34) * scale,
-                textLeft + dp(28) * scale, pivotY + scaledHeight / 2f - dp(31) * scale);
+        float bodyBottom = cardBottom - dp(46) * scale;
+        float bodyAvailableHeight = Math.max(dp(35), bodyBottom - bodyTop);
+        float bodyLineHeight = dp(21) * scale;
+        int bodyLineLimit = Math.max(2, Math.min(18, (int) (bodyAvailableHeight / Math.max(dp(15), bodyLineHeight))));
+        String bodyText = card.body == null ? "" : card.body.trim();
+        if (bodyText.isEmpty()) bodyText = "（空白记录）";
+        paint.setTextAlign(Paint.Align.LEFT);
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
+        paint.setTextSize(dp(14) * scale);
+        paint.setColor(withAlpha(contrastInk(bg) == Color.WHITE ? Color.rgb(250, 249, 255) : Color.rgb(58, 55, 73), alpha));
+        List<String> bodyLines = wrap(bodyText, paint, available, bodyLineLimit);
+        int bodySave = canvas.save();
+        canvas.clipRect(textLeft, bodyTop - dp(18) * scale, right, bodyBottom + dp(2) * scale);
+        for (int i = 0; i < bodyLines.size(); i++) {
+            canvas.drawText(bodyLines.get(i), textLeft, bodyTop + i * bodyLineHeight, paint);
+        }
+        canvas.restoreToCount(bodySave);
+
+        paint.setColor(withAlpha(Color.argb(75, 46, 41, 63), alpha));
+        rect.set(textLeft, cardBottom - dp(30) * scale,
+                textLeft + dp(24) * scale, cardBottom - dp(27) * scale);
         canvas.drawRoundRect(rect, dp(2) * scale, dp(2) * scale, paint);
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setTextSize(dp(10) * scale);
-        paint.setColor(withAlpha(Color.argb(155, 56, 51, 74), alpha));
-        canvas.drawText(card.pinned ? "优先显示" : (card.favorite ? "已收藏" : "文字卡片"), textLeft + dp(36) * scale,
-                pivotY + scaledHeight / 2f - dp(24) * scale, paint);
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
+        paint.setColor(withAlpha(Color.argb(145, 46, 41, 63), alpha));
+        String footer = card.pinned ? "优先显示" : (card.favorite ? "已收藏" : "文字卡片");
+        canvas.drawText(footer, textLeft + dp(31) * scale, cardBottom - dp(19) * scale, paint);
     }
 
     private void drawEmptyState(Canvas canvas, float w, float h) {
@@ -262,10 +279,11 @@ public final class DeckView extends View {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 if (animator != null) animator.cancel();
+                sound.stopRotate();
+                motionSoundStarted = false;
                 downY = event.getY();
                 downX = event.getX();
                 downProgress = progress;
-                lastProgress = progress;
                 dragging = false;
                 longPressed = false;
                 motionSoundStarted = false;
@@ -280,11 +298,12 @@ public final class DeckView extends View {
                 float dx = event.getX() - downX;
                 if (!dragging && (Math.abs(dy) > touchSlop || Math.abs(dx) > touchSlop)) {
                     dragging = Math.abs(dy) > Math.abs(dx) * 0.85f;
-                    if (dragging) cancelDeckLongPress();
+                    if (dragging) cancelLongPress();
                 }
                 if (dragging && !longPressed) {
-                    float localStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
-                    progress = clamp(downProgress - dy / localStep, 0f, Math.max(0, cards.size() - 1));
+                    float visualStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
+                    float dragStep = Math.max(dp(105), visualStep * 0.62f);
+                    progress = clamp(downProgress - dy / dragStep, 0f, Math.max(0, cards.size() - 1));
                     if (!motionSoundStarted && Math.abs(dy) > dp(5)) {
                         sound.startRotate();
                         motionSoundStarted = true;
@@ -295,21 +314,22 @@ public final class DeckView extends View {
                         if (motionSoundStarted) sound.playTick();
                         if (hapticsEnabled) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                     }
-                    lastProgress = progress;
-                    invalidate();
+                        invalidate();
                     if (listener != null) listener.onCardChanged(getSelectedCard());
                 }
                 return true;
             case MotionEvent.ACTION_UP:
-                cancelDeckLongPress();
+                cancelLongPress();
                 if (velocityTracker != null) {
                     velocityTracker.addMovement(event);
                     velocityTracker.computeCurrentVelocity(1000);
                 }
                 if (dragging && !longPressed) {
                     float velocityY = velocityTracker == null ? 0f : velocityTracker.getYVelocity();
-                    float localStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
-                    float projected = progress - (velocityY / localStep) * 0.14f;
+                    float visualStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
+                    float dragStep = Math.max(dp(105), visualStep * 0.62f);
+                    float projection = clamp((velocityY / dragStep) * 0.30f, -8f, 8f);
+                    float projected = progress - projection;
                     int target = Math.round(projected);
                     target = Math.max(0, Math.min(cards.size() - 1, target));
                     animateTo(target, true);
@@ -319,7 +339,7 @@ public final class DeckView extends View {
                 recycleVelocity();
                 return true;
             case MotionEvent.ACTION_CANCEL:
-                cancelDeckLongPress();
+                cancelLongPress();
                 if (dragging) animateTo(Math.round(progress), true);
                 recycleVelocity();
                 return true;
@@ -328,7 +348,7 @@ public final class DeckView extends View {
     }
 
     private void scheduleLongPress() {
-        cancelDeckLongPress();
+        cancelLongPress();
         longPressRunnable = () -> {
             if (!dragging && !cards.isEmpty()) {
                 longPressed = true;
@@ -339,7 +359,7 @@ public final class DeckView extends View {
         handler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout());
     }
 
-    private void cancelDeckLongPress() {
+    private void cancelLongPress() {
         if (longPressRunnable != null) handler.removeCallbacks(longPressRunnable);
         longPressRunnable = null;
     }
@@ -353,10 +373,10 @@ public final class DeckView extends View {
         if (animator != null) animator.cancel();
         final float start = progress;
         final float end = target;
-        long duration = Math.min(520L, 190L + (long) (Math.abs(end - start) * 72L));
+        long duration = Math.min(260L, 95L + (long) (Math.abs(end - start) * 19L));
         animator = ValueAnimator.ofFloat(start, end);
         animator.setDuration(duration);
-        animator.setInterpolator(new DecelerateInterpolator(1.55f));
+        animator.setInterpolator(new DecelerateInterpolator(1.15f));
         animator.addUpdateListener(a -> {
             progress = (float) a.getAnimatedValue();
             int rounded = Math.round(progress);
