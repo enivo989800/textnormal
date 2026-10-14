@@ -922,6 +922,11 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         return drawable;
     }
 
+    private int contrastInk(int background) {
+        double luminance = (0.299 * Color.red(background) + 0.587 * Color.green(background) + 0.114 * Color.blue(background)) / 255.0;
+        return luminance < 0.52 ? Color.WHITE : Color.rgb(43, 39, 59);
+    }
+
     private int dp(float value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private String safeMessage(Exception e) {

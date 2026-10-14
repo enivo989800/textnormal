@@ -11,6 +11,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
@@ -298,7 +299,7 @@ public final class DeckView extends View {
                 float dx = event.getX() - downX;
                 if (!dragging && (Math.abs(dy) > touchSlop || Math.abs(dx) > touchSlop)) {
                     dragging = Math.abs(dy) > Math.abs(dx) * 0.85f;
-                    if (dragging) cancelLongPress();
+                    if (dragging) cancelDeckLongPress();
                 }
                 if (dragging && !longPressed) {
                     float visualStep = step > dp(1) ? step : Math.max(dp(130), getHeight() * 0.34f);
@@ -319,7 +320,7 @@ public final class DeckView extends View {
                 }
                 return true;
             case MotionEvent.ACTION_UP:
-                cancelLongPress();
+                cancelDeckLongPress();
                 if (velocityTracker != null) {
                     velocityTracker.addMovement(event);
                     velocityTracker.computeCurrentVelocity(1000);
@@ -339,7 +340,7 @@ public final class DeckView extends View {
                 recycleVelocity();
                 return true;
             case MotionEvent.ACTION_CANCEL:
-                cancelLongPress();
+                cancelDeckLongPress();
                 if (dragging) animateTo(Math.round(progress), true);
                 recycleVelocity();
                 return true;
@@ -348,7 +349,7 @@ public final class DeckView extends View {
     }
 
     private void scheduleLongPress() {
-        cancelLongPress();
+        cancelDeckLongPress();
         longPressRunnable = () -> {
             if (!dragging && !cards.isEmpty()) {
                 longPressed = true;
@@ -359,7 +360,7 @@ public final class DeckView extends View {
         handler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout());
     }
 
-    private void cancelLongPress() {
+    private void cancelDeckLongPress() {
         if (longPressRunnable != null) handler.removeCallbacks(longPressRunnable);
         longPressRunnable = null;
     }
