@@ -321,7 +321,7 @@ public final class ArcGroupRail extends View {
                 float dy = event.getY() - downY;
                 if (!dragging && Math.hypot(dx, dy) > touchSlop) {
                     dragging = true;
-                    cancelLongPress();
+                    cancelRailLongPress();
                     if (!railSoundStarted) {
                         sound.startRotate(true);
                         railSoundStarted = true;
@@ -338,7 +338,7 @@ public final class ArcGroupRail extends View {
                 }
                 return true;
             case MotionEvent.ACTION_UP:
-                cancelLongPress();
+                cancelRailLongPress();
                 if (downOnAdd && isNearAddButton(event.getX(), event.getY())) {
                     if (listener != null) listener.onAddGroup();
                 } else if (!longPressed) {
@@ -365,7 +365,7 @@ public final class ArcGroupRail extends View {
                 downOnAdd = false;
                 return true;
             case MotionEvent.ACTION_CANCEL:
-                cancelLongPress();
+                cancelRailLongPress();
                 sound.stopRotate();
                 railSoundStarted = false;
                 dragging = false;
@@ -387,7 +387,7 @@ public final class ArcGroupRail extends View {
     }
 
     private void scheduleLongPress() {
-        cancelLongPress();
+        cancelRailLongPress();
         longPressRunnable = () -> {
             if (!dragging && !downOnAdd) {
                 longPressed = true;
@@ -399,7 +399,7 @@ public final class ArcGroupRail extends View {
         handler.postDelayed(longPressRunnable, ViewConfiguration.getLongPressTimeout());
     }
 
-    private void cancelLongPress() {
+    private void cancelRailLongPress() {
         if (longPressRunnable != null) handler.removeCallbacks(longPressRunnable);
         longPressRunnable = null;
     }
@@ -431,7 +431,7 @@ public final class ArcGroupRail extends View {
     private float clamp(float value, float min, float max) { return Math.max(min, Math.min(max, value)); }
 
     @Override protected void onDetachedFromWindow() {
-        cancelLongPress();
+        cancelRailLongPress();
         if (highlightAnimator != null) highlightAnimator.cancel();
         if (sound != null) sound.stopRotate();
         super.onDetachedFromWindow();
