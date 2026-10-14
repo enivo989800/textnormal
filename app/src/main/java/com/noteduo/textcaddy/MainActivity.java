@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
@@ -71,7 +72,8 @@ public final class MainActivity extends Activity implements DeckView.Listener {
     private final Map<String, String> lastCardByGroup = new HashMap<>();
     private boolean arcEnabled = true;
     private boolean hapticsEnabled = false;
-    private float soundVolume = 0.36f;
+    private int railVolumePct = 100;
+    private int cardVolumePct = 100;
     private boolean soundEnabled = true;
     private boolean railSoundEnabled = true;
     private boolean cardSoundEnabled = true;
@@ -85,8 +87,10 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         cardSoundEnabled = settings.getBoolean("card_sound_enabled", true);
         hapticsEnabled = settings.getBoolean("haptics_enabled", false);
         arcEnabled = settings.getBoolean("arc_enabled", true);
-        soundVolume = settings.getInt("sound_volume", 36) / 100f;
-        sound = new SoundEngine(this, soundEnabled, soundVolume);
+        railVolumePct = settings.getInt("rail_volume", 100);
+        cardVolumePct = settings.getInt("card_volume", 100);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        sound = new SoundEngine(this, soundEnabled, railVolumePct / 100f, cardVolumePct / 100f);
         sound.setRailEnabled(railSoundEnabled);
         sound.setCardEnabled(cardSoundEnabled);
         currentGroupId = settings.getString("current_group", "all");
@@ -735,11 +739,16 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         panel.addView(cardSoundSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
         panel.addView(arcSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
         panel.addView(hapticSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
-        TextView volumeLabel = text("声音音量　" + Math.round(soundVolume * 100) + "%", 12, MUTED, false);
-        SeekBar volumeBar = new SeekBar(this);
-        volumeBar.setMax(100); volumeBar.setProgress(Math.round(soundVolume * 100));
-        panel.addView(volumeLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)));
-        panel.addView(volumeBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
+        TextView railVolumeLabel = text("圆弧转盘音量　" + railVolumePct + "%", 12, MUTED, false);
+        SeekBar railVolumeBar = new SeekBar(this);
+        railVolumeBar.setMax(200); railVolumeBar.setProgress(railVolumePct);
+        panel.addView(railVolumeLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)));
+        panel.addView(railVolumeBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
+        TextView cardVolumeLabel = text("卡片滑动音量　" + cardVolumePct + "%", 12, MUTED, false);
+        SeekBar cardVolumeBar = new SeekBar(this);
+        cardVolumeBar.setMax(200); cardVolumeBar.setProgress(cardVolumePct);
+        panel.addView(cardVolumeLabel, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)));
+        panel.addView(cardVolumeBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
         TextView export = settingsAction("导出全部记录（JSON 备份）");
         TextView restore = settingsAction("从 JSON 备份恢复");
         TextView about = text("数据只保存在本机；备份由你主动导出。", 11, MUTED, false);
@@ -752,8 +761,10 @@ public final class MainActivity extends Activity implements DeckView.Listener {
         LinearLayout.LayoutParams aboutLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(32));
         aboutLp.topMargin = dp(6);
         panel.addView(about, aboutLp);
+        ScrollView settingsScroll = new ScrollView(this);
+        settingsScroll.addView(panel);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("交互与数据设置")
-                .setView(panel).setPositiveButton("完成", null).create();
+                .setView(settingsScroll).setPositiveButton("完成", null).create();
         soundSwitch.setOnCheckedChangeListener((button, checked) -> {
             soundEnabled = checked;
             sound.setEnabled(checked);
@@ -778,15 +789,25 @@ public final class MainActivity extends Activity implements DeckView.Listener {
             groupRail.setHapticsEnabled(checked);
             settings.edit().putBoolean("haptics_enabled", checked).apply();
         });
-        volumeBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        railVolumeBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                soundVolume = progress / 100f;
-                sound.setVolume(soundVolume);
-                volumeLabel.setText("声音音量　" + progress + "%");
-                settings.edit().putInt("sound_volume", progress).apply();
+                railVolumePct = progress;
+                sound.setRailVolume(progress / 100f);
+                railVolumeLabel.setText("圆弧转盘音量　" + progress + "%");
+                settings.edit().putInt("rail_volume", progress).apply();
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) { }
-            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { sound.playSnap(true); }
+        });
+        cardVolumeBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                cardVolumePct = progress;
+                sound.setCardVolume(progress / 100f);
+                cardVolumeLabel.setText("卡片滑动音量　" + progress + "%");
+                settings.edit().putInt("card_volume", progress).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { sound.playSnap(false); }
         });
         export.setOnClickListener(v -> { dialog.dismiss(); startExport(); });
         restore.setOnClickListener(v -> {

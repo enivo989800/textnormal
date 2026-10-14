@@ -245,7 +245,7 @@ public final class ArcGroupRail extends View {
         float spacing = count <= 1 ? dp(42) : Math.min(dp(43), maxSpan / (count - 1));
         spacing = Math.max(dp(25), spacing);
         float halfSpan = (count - 1) * spacing / 2f;
-        float centerY = clamp(h * 0.64f, halfSpan + dp(34), h - dp(57) - halfSpan);
+        float centerY = clamp(h * 0.5f, halfSpan + dp(34), h - dp(57) - halfSpan);
         float iconRadius = Math.min(dp(16), spacing * 0.39f);
         iconRadius = Math.max(dp(10.5f), iconRadius);
         return new RailGeometry(centerY, spacing, halfSpan, w - iconRadius - dp(2), iconRadius);

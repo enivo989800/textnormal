@@ -5,6 +5,9 @@ import android.media.AudioAttributes;
 import android.media.SoundPool;
 import android.os.SystemClock;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
 /** Small, throttled mechanical sound mixer for the rail and card deck. */
 public final class SoundEngine {
     private final SoundPool pool;
@@ -20,26 +23,23 @@ public final class SoundEngine {
     private boolean rotatingRail;
     private boolean lastTickRail;
     private boolean snapRail;
-    private float volume;
-    private boolean rotateLoaded;
-    private boolean tickLoaded;
-    private boolean snapLoaded;
+    private float railVolume;
+    private float cardVolume;
+    private final Set<Integer> loadedIds = ConcurrentHashMap.newKeySet();
     private long lastTickAt;
     private boolean released;
 
-    public SoundEngine(Context context, boolean enabled, float volume) {
+    public SoundEngine(Context context, boolean enabled, float railVolume, float cardVolume) {
         this.enabled = enabled;
-        this.volume = clamp(volume);
+        this.railVolume = clamp(railVolume);
+        this.cardVolume = clamp(cardVolume);
         AudioAttributes attributes = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build();
         pool = new SoundPool.Builder().setMaxStreams(4).setAudioAttributes(attributes).build();
         pool.setOnLoadCompleteListener((soundPool, sampleId, status) -> {
-            if (status != 0) return;
-            if (sampleId == rotateId) rotateLoaded = true;
-            if (sampleId == tickId) tickLoaded = true;
-            if (sampleId == snapId) snapLoaded = true;
+            if (status == 0) loadedIds.add(sampleId);
         });
         rotateId = pool.load(context, R.raw.rotate_loop, 1);
         tickId = pool.load(context, R.raw.mechanical_tick, 1);
@@ -68,16 +68,36 @@ public final class SoundEngine {
         if (!cardEnabled && !snapRail) stopSnap();
     }
 
-    public synchronized void setVolume(float value) { if (!released) volume = clamp(value); }
+    public synchronized void setRailVolume(float value) {
+        if (released) return;
+        railVolume = clamp(value);
+        if (rotateStream != 0 && rotatingRail) applyRotateVolume();
+    }
+
+    public synchronized void setCardVolume(float value) {
+        if (released) return;
+        cardVolume = clamp(value);
+        if (rotateStream != 0 && !rotatingRail) applyRotateVolume();
+    }
+
+    private void applyRotateVolume() {
+        float v = level(rotatingRail, rotatingRail ? 0.52f : 0.61f);
+        pool.setVolume(rotateStream, v, v);
+    }
+
+    /** Volume is 0..2 (0-200%); SoundPool caps each stream at 1.0. */
+    private float level(boolean rail, float gain) {
+        return Math.max(0f, Math.min(1f, (rail ? railVolume : cardVolume) * gain));
+    }
 
     public synchronized void startRotate(boolean rail) {
-        if (released || !sourceEnabled(rail) || !rotateLoaded) return;
+        if (released || !sourceEnabled(rail) || !loadedIds.contains(rotateId)) return;
         if (rotateStream != 0 && rotatingRail == rail) return;
         stopRotate();
         rotatingRail = rail;
         float gain = rail ? 0.52f : 0.61f;
         float rate = rail ? 0.88f : 1.12f;
-        rotateStream = pool.play(rotateId, volume * gain, volume * gain, 1, -1, rate);
+        rotateStream = pool.play(rotateId, level(rail, gain), level(rail, gain), 1, -1, rate);
     }
 
     public synchronized void stopRotate() {
@@ -88,7 +108,7 @@ public final class SoundEngine {
     }
 
     public synchronized void playTick(boolean rail) {
-        if (released || !sourceEnabled(rail) || !tickLoaded) return;
+        if (released || !sourceEnabled(rail) || !loadedIds.contains(tickId)) return;
         long now = SystemClock.uptimeMillis();
         long throttleMs = rail ? 43L : 28L;
         if (now - lastTickAt < throttleMs) return;
@@ -97,19 +117,19 @@ public final class SoundEngine {
         lastTickRail = rail;
         float gain = rail ? 0.40f : 0.37f;
         float rate = rail ? 0.91f : 1.16f;
-        tickStream = pool.play(tickId, volume * gain, volume * gain, 2, 0, rate);
+        tickStream = pool.play(tickId, level(rail, gain), level(rail, gain), 2, 0, rate);
     }
 
     public synchronized void playSnap(boolean rail) {
         if (released) return;
         stopRotate();
         stopTick();
-        if (!sourceEnabled(rail) || !snapLoaded) return;
+        if (!sourceEnabled(rail) || !loadedIds.contains(snapId)) return;
         stopSnap();
         float gain = rail ? 0.53f : 0.57f;
         float rate = rail ? 0.95f : 1.08f;
         snapRail = rail;
-        snapStream = pool.play(snapId, volume * gain, volume * gain, 3, 0, rate);
+        snapStream = pool.play(snapId, level(rail, gain), level(rail, gain), 3, 0, rate);
     }
 
     public synchronized void stopAllMotionSounds() {
@@ -144,5 +164,5 @@ public final class SoundEngine {
         released = true;
     }
 
-    private float clamp(float value) { return Math.max(0f, Math.min(1f, value)); }
+    private float clamp(float value) { return Math.max(0f, Math.min(2f, value)); }
 }
