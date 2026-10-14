@@ -209,7 +209,11 @@ public final class DataStore {
     }
 
     public synchronized String exportJson() {
-        return toJson().toString(2);
+        try {
+            return toJson().toString(2);
+        } catch (JSONException e) {
+            return toJson().toString();
+        }
     }
 
     public synchronized void importJson(String raw) throws JSONException {
