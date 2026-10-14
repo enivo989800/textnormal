@@ -27,14 +27,11 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Accept Android SDK licenses
-        shell: bash
-        run: |
-          set +o pipefail
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-
-      - name: Install Android platform and build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          packages: 'platforms;android-35,build-tools;35.0.0,platform-tools'
 
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
